@@ -1,26 +1,24 @@
 #include <Arduino.h>
 #include <mcp_can.h>
-#include <SPI.h>
 
 #include"LedManager.h"
+#include"aem_vcu.h"
+#include"j1939.h"
+
+#define DEBUG_PRINT 1
 
 #define CAN_CHIP_SELECT_PIN 3
 #define CAN_BAUD_RATE 500E3
-
-#define CAN_PACKET_M106_DriverInputs1 0x2F0A006
-#define CAN_PGN_61443 0xF00316
 
 #define ERROR_CODE_CAN_SETUP_FAILED 3
 
 LedManager led;
 MCP_CAN can(CAN_CHIP_SELECT_PIN);
 
-unsigned long msgId = -1;
-unsigned char msgBuffer[64];
-byte msgBufferLen = 0;
-byte msgIsExtended = 0;
+uint8_t inBufferr[64];
+uint8_t inBufferrLen = 0;
 
-byte sendJ1939(long lPGN, byte nPriority, byte nSrcAddr, byte nDestAddr, byte* nData, int nDataLen);
+byte sendJ1939(uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen);
 
 void setup() {
 
@@ -37,7 +35,6 @@ void setup() {
     }
   }
   can.setMode(MCP_NORMAL);
-
 }
 
 void loop() {
@@ -45,7 +42,9 @@ void loop() {
     return;
   }
 
-  if (can.readMsgBuf(&msgId, &msgIsExtended, &msgBufferLen, msgBuffer) != CAN_OK) {
+  uint32_t msgId = -1;
+  byte msgIsExtended = 0;
+  if (can.readMsgBuf(&msgId, &msgIsExtended, &inBufferrLen, inBufferr) != CAN_OK) {
     Serial.println("Unable to can.readMsgBuf");
     return;
   }
@@ -55,35 +54,71 @@ void loop() {
     return;
   }
 
-  led.flashOn(5);
+  led.flashOn(2);
 
   switch (msgId) {
 
-    case CAN_PACKET_M106_DriverInputs1: {
+    case PACKET_ID_M106_DriverInputs1: {
 
-      unsigned int accelPedal = msgBuffer[1];
-      float accelPedalPct = ((float)accelPedal) * 0.392157f;
+      PACKET_M106_DriverInputs1* inPacket = (PACKET_M106_DriverInputs1*)&inBufferr[0];
+      float AccelPedalPct = static_cast<float>(inPacket->AccelPedal) * 0.392157f;
 
-      Serial.print("AccelPedal %");
-      Serial.println(accelPedalPct, 4);
+      #ifdef DEBUG_PRINT
+        Serial.println("PACKET_M106_DriverInputs1:");
+        Serial.print("  Manual_Regen2: "); Serial.println(inPacket->Manual_Regen2, DEC);
+        Serial.print("  Manual_Regen1: "); Serial.println(inPacket->Manual_Regen1, DEC);
+        Serial.print("  Manual_Regen: "); Serial.println(inPacket->Manual_Regen, DEC);
+        Serial.print("  AccelPedalValid: "); Serial.println(inPacket->AccelPedalValid == 0 ? "false" : "true");
+        Serial.print("  AccelPedal1Valid: "); Serial.println(inPacket->AccelPedal1Valid == 0 ? "false" : "true");
+        Serial.print("  AccelPedal2Valid: "); Serial.println(inPacket->AccelPedal2Valid == 0 ? "false" : "true");
+        Serial.print("  Brake_Switch: "); Serial.println(inPacket->Brake_Switch == 0 ? "false" : "true");
+        Serial.print("  Brake_Switch1: "); Serial.println(inPacket->Brake_Switch1 == 0 ? "false" : "true");
+        Serial.print("  Brake_Switch2: "); Serial.println(inPacket->Brake_Switch2 == 0 ? "false" : "true");
+        Serial.print("  Ignition_Switch: "); Serial.println(inPacket->Ignition_Switch == 0 ? "false" : "true");
+        Serial.print("  Start_Switch: "); Serial.println(inPacket->Start_Switch == 0 ? "false" : "true");
+        Serial.print("  AccelPedalXCheckDiff: "); Serial.println(inPacket->AccelPedalXCheckDiff, DEC);
+        Serial.print("  AccelPedal2: "); Serial.println(inPacket->AccelPedal2, DEC);
+        Serial.print("  AccelPedal1: "); Serial.println(inPacket->AccelPedal1, DEC);
+        Serial.print("  AccelPedal: "); Serial.println(inPacket->AccelPedal, DEC);
+        Serial.print("  AccelPedal: "); Serial.println(inPacket->AccelPedal, DEC);
+        Serial.print("  AccelPedalPct:"); Serial.println(AccelPedalPct, 4);
+      #endif
 
-      msgBuffer[0] = 0;  // 558, 559, 1437
-      msgBuffer[1] = accelPedal;  // 91
-      msgBuffer[2] = 0;  // 92
-      msgBuffer[3] = 0;  // 974
-      msgBuffer[4] = 0;  // unused
-      msgBuffer[5] = 0;  // unused
-      msgBuffer[6] = 0;  // unused
-      msgBuffer[7] = 0;  // unused
 
-      sendJ1939(61443, 0, 0, 0, msgBuffer, 8);
-      
+      PACKET_PGN_61443_ElectricEngineController2 outPacket;
+      outPacket.Road_Speed_Limit_Status = 0;
+      outPacket.Accelerator_Pedal_Kickdown_Switch = 0;
+      outPacket.Accelerator_Pedal_1_Low_Idle_Switch = 0;
+      outPacket.Accelerator_Pedal_Position_1 = inPacket->AccelPedal;
+      outPacket.Percent_Load_At_Current_Speed = 1;
+      outPacket.Remote_Accelerator_Pedal_Position = 0;
+      sendJ1939(PGN_61443_ElectricEngineController2, 3, 0, 0, (uint8_t*)&outPacket, PGN_61443_ElectricEngineController2_Size);
+
+      break;
+    }
+
+    case PACKET_ID__M116_VehicleInputs3: {
+
+      PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
+      float BrakeVacPressurePct = (static_cast<float>(inPacket->BrakeVacPressure) * 0.14504f) - 14.696f;
+
+      #ifdef DEBUG_PRINT
+        Serial.println("PACKET_M106_DriverInputs1:");
+        Serial.print("  TC_Slip_Measured: "); Serial.println(inPacket->TC_Slip_Measured, DEC);
+        Serial.print("  Ground_WheelSpeed: "); Serial.println(inPacket->Ground_WheelSpeed, DEC);
+        Serial.print("  DriveWheel_Speed: "); Serial.println(inPacket->DriveWheel_Speed, DEC);
+        Serial.print("  DriveShaft_Speed: "); Serial.println(inPacket->DriveShaft_Speed, DEC);
+        Serial.print("  Vehicle_Speed: "); Serial.println(inPacket->Vehicle_Speed, DEC);
+        Serial.print("  BrakeVacPressure: "); Serial.println(inPacket->BrakeVacPressure, DEC);
+        Serial.print("  BrakeVacPressurePct:"); Serial.println(BrakeVacPressurePct, 4);
+      #endif
+
       break;
     }
   }
 }
 
-byte sendJ1939(long lPGN, byte nPriority, byte nSrcAddr, byte nDestAddr, byte* nData, int nDataLen) {
+byte sendJ1939(uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen) {
 
   // check for a p2p packet
   bool isPeerToPeer = false;
@@ -94,11 +129,11 @@ byte sendJ1939(long lPGN, byte nPriority, byte nSrcAddr, byte nDestAddr, byte* n
     isPeerToPeer = true;
   }
 
-  long lID = static_cast<long>(nPriority)<< 26 | static_cast<long>(lPGN << 8) | static_cast<long>(nSrcAddr);
+  uint32_t lID = static_cast<uint32_t>(nPriority)<< 26 | static_cast<uint32_t>(lPGN << 8) | static_cast<uint32_t>(nSrcAddr);
 
   if (isPeerToPeer) {
     lID = lID & 0xFFFF00FF;
-    lID = lID | (static_cast<long>(nDestAddr) << 8);
+    lID = lID | (static_cast<uint32_t>(nDestAddr) << 8);
   }
 
   return can.sendMsgBuf(lID, CAN_EXTID, nDataLen, nData);
