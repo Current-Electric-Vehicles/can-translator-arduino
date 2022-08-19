@@ -27,7 +27,7 @@ struct PACKET_M106_DriverInputs1 {
 };
 
 
-#define PACKET_ID__M116_VehicleInputs3 0x2F0A016
+#define PACKET_ID_M116_VehicleInputs3 0x2F0A016
 
 struct PACKET_M116_VehicleInputs3 {
     uint8_t TC_Slip_Measured;
@@ -36,6 +36,17 @@ struct PACKET_M116_VehicleInputs3 {
     uint16_t DriveShaft_Speed;
     uint8_t Vehicle_Speed;
     uint8_t BrakeVacPressure;
+};
+
+
+#define PACKET_ID_M138_MotorSpeedData2 0x2F0A038
+
+struct PACKET_M138_MotorSpeedData2 {
+    uint16_t SpeedControl_PID_Error : 12;
+    uint16_t SpeedControl_PID : 12;
+    uint16_t Motor_TargetSpeed;
+    uint16_t LaunchTarget_Speed;
+    uint8_t Undefined;
 };
 
 #endif

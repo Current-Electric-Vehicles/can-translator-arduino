@@ -2,6 +2,10 @@
 #include <Arduino.h>
 #include "LedManager.h"
 
+LedManager::LedManager() {
+    pinMode(LED_BUILTIN, OUTPUT);
+}
+
 void LedManager::on() {
     digitalWrite(LED_BUILTIN, HIGH);
 }
@@ -35,16 +39,18 @@ void LedManager::flashOff(unsigned long milliseconds) {
 void LedManager::flashOnNum(unsigned int count, unsigned long milliseconds) {
     for (unsigned int i=0; i<count; i++) {
         this->flashOn(milliseconds);
+        delay(milliseconds);
     }
 }
 
 void LedManager::flashOffNum(unsigned int count, unsigned long milliseconds) {
     for (unsigned int i=0; i<count; i++) {
         this->flashOff(milliseconds);
+        delay(milliseconds);
     }
 }
 
 void LedManager::flashError(unsigned int errorCode) {
     this->flashOnNum(errorCode);
-    delay(2000);
+    delay(3000);
 }
