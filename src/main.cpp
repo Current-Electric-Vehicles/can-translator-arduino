@@ -8,9 +8,10 @@
 
 #define DEBUG_ENABLED true
 #define CAN_EMIT_ENABLED false
-#define CAN_EMIT_FREQUENCE_MILLIS 20
+#define CAN_EMIT_FREQUENCE_MILLIS 50
 #define CAN_CHIP_SELECT_PIN 3
 #define CAN_BAUD_RATE 500E3
+#define MAX_MOTOR_TORQUE 500
 
 #define ERROR_CODE_CAN_SETUP_FAILED 3
 
@@ -22,6 +23,8 @@
 #define debug_print(...)
 #define debug_println(...)
 #endif
+
+#define CLAMP(v, min, max) (v < min ? min : (v > max ? max : v))
 
 AsyncTimer timer;
 LedManager led;
@@ -90,7 +93,7 @@ void loop() {
     case PACKET_ID_M106_DriverInputs1: {
 
       PACKET_M106_DriverInputs1* inPacket = (PACKET_M106_DriverInputs1*)&inBufferr[0];
-      float AccelPedalPct = static_cast<float>(inPacket->AccelPedal) * 0.392157f;
+      uint8_t AccelPedalPct = static_cast<float>(inPacket->AccelPedal) * 0.392157f;
 
       debug_println("PACKET_M106_DriverInputs1:");
       debug_print("  Manual_Regen2: "); debug_println(inPacket->Manual_Regen2, DEC);
@@ -108,15 +111,13 @@ void loop() {
       debug_print("  AccelPedal2: "); debug_println(inPacket->AccelPedal2, DEC);
       debug_print("  AccelPedal1: "); debug_println(inPacket->AccelPedal1, DEC);
       debug_print("  AccelPedal: "); debug_println(inPacket->AccelPedal, DEC);
-      debug_print("  AccelPedal: "); debug_println(inPacket->AccelPedal, DEC);
       debug_print("  AccelPedalPct:"); debug_println(AccelPedalPct, 4);
 
       pgn61443_valid = true;
-      pgn61443.Road_Speed_Limit_Status = 0;
-      pgn61443.Accelerator_Pedal_Kickdown_Switch = 0;
-      pgn61443.Accelerator_Pedal_1_Low_Idle_Switch = 0;
+      pgn61443.Road_Speed_Limit_Status = 1;
+      pgn61443.Accelerator_Pedal_Kickdown_Switch = (AccelPedalPct >= 95) ? 1 : 0;
+      pgn61443.Accelerator_Pedal_1_Low_Idle_Switch = 0b11;
       pgn61443.Accelerator_Pedal_Position_1 = inPacket->AccelPedal;
-      pgn61443.Percent_Load_At_Current_Speed = 1;
       pgn61443.Remote_Accelerator_Pedal_Position = 0;
 
       break;
@@ -125,7 +126,7 @@ void loop() {
     case PACKET_ID_M116_VehicleInputs3: {
 
       PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
-      float BrakeVacPressurePct = (static_cast<float>(inPacket->BrakeVacPressure) * 0.14504f) - 14.696f;
+      uint8_t BrakeVacPressurePct = static_cast<uint8_t>((static_cast<float>(inPacket->BrakeVacPressure) * 0.14504f) - 14.696f);
 
       debug_println("PACKET_M106_DriverInputs1:");
       debug_print("  TC_Slip_Measured: "); debug_println(inPacket->TC_Slip_Measured, DEC);
@@ -142,10 +143,10 @@ void loop() {
     case PACKET_ID_M138_MotorSpeedData2: {
 
       PACKET_M138_MotorSpeedData2* inPacket = (PACKET_M138_MotorSpeedData2*)&inBufferr[0];
-      float LaunchTarget_Speed = (static_cast<float>(inPacket->LaunchTarget_Speed) * 0.25);
-      float Motor_TargetSpeed = (static_cast<float>(inPacket->Motor_TargetSpeed) * 0.25);
-      float SpeedControl_PID = (static_cast<float>(inPacket->SpeedControl_PID) * 0.5);
-      float SpeedControl_PID_Error = (static_cast<float>(inPacket->SpeedControl_PID_Error) * 0.5);
+      uint8_t LaunchTarget_Speed = (static_cast<float>(inPacket->LaunchTarget_Speed) * 0.25f);
+      uint8_t Motor_TargetSpeed = (static_cast<float>(inPacket->Motor_TargetSpeed) * 0.25f);
+      uint8_t SpeedControl_PID = (static_cast<float>(inPacket->SpeedControl_PID) * 0.5f);
+      uint8_t SpeedControl_PID_Error = (static_cast<float>(inPacket->SpeedControl_PID_Error) * 0.5f);
 
       debug_println("PACKET_M138_MotorSpeedData2:");
       debug_print("  LaunchTarget_Speed: "); debug_println(inPacket->LaunchTarget_Speed, DEC);
@@ -156,6 +157,26 @@ void loop() {
       debug_print("  Motor_TargetSpeed: "); debug_println(Motor_TargetSpeed, DEC);
       debug_print("  SpeedControl_PID: "); debug_println(SpeedControl_PID, DEC);
       debug_print("  SpeedControl_PID_Error: "); debug_println(SpeedControl_PID_Error, DEC);
+      break;
+    }
+
+    case PACKET_ID_M120_MotorTorqueData1: {
+
+      PACKET_M120_MotorTorqueData1* inPacket = (PACKET_M120_MotorTorqueData1*)&inBufferr[0];
+      uint8_t Motor1_Torque_RequestPct = CLAMP((abs(inPacket->Motor1_Torque_Request) / MAX_MOTOR_TORQUE) * 100, 0, 250);
+
+      debug_println("PACKET_M120_MotorTorqueData1:");
+      debug_print("  Motor1_Torque_Request: "); debug_println(inPacket->Motor1_Torque_Request, DEC);
+      debug_print("  Motor1_TqLimHi: "); debug_println(inPacket->Motor1_TqLimHi, DEC);
+      debug_print("  Motor1_TqLimLo: "); debug_println(inPacket->Motor1_TqLimLo, DEC);
+      debug_print("  Motor1_TqTable: "); debug_println(inPacket->Motor1_TqTable, DEC);
+      debug_print("  Motor1_TqLimMultHi: "); debug_println(inPacket->Motor1_TqLimMultHi, DEC);
+      debug_print("  Motor1_TqLimMultLo: "); debug_println(inPacket->Motor1_TqLimMultLo, DEC);
+      debug_print("  Motor1_Torque_RequestPct: "); debug_println(Motor1_Torque_RequestPct, DEC);
+
+      pgn61443_valid = true;
+      pgn61443.Percent_Load_At_Current_Speed = Motor1_Torque_RequestPct;
+
       break;
     }
   }

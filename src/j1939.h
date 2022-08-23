@@ -4,6 +4,8 @@
 
 #include <Arduino.h>
 
+// https://powertraincontrolsolutions.com/download/Released/Public/Developer_Files/PCS%20J1939%20Messages%20v2_1.pdf
+
 #define PGN_61443_ElectricEngineController2 61443
 #define PGN_61443_ElectricEngineController2_Size 4
 
