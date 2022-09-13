@@ -7,10 +7,19 @@
 #include "j1939.h"
 
 #define DEBUG_ENABLED true
-#define CAN_EMIT_ENABLED false
-#define CAN_EMIT_FREQUENCE_MILLIS 50
-#define CAN_CHIP_SELECT_PIN 3
-#define CAN_BAUD_RATE 500E3
+
+#define CAN1_CHIP_SELECT_PIN 3
+#define CAN1_LISTEN_ENABLED true
+#define CAN1_EMIT_ENABLED true
+#define CAN1_BAUD_RATE CAN_500KBPS
+#define CAN1_EMIT_FREQUENCE_MILLIS 50
+
+#define CAN2_CHIP_SELECT_PIN 4
+#define CAN2_LISTEN_ENABLED true
+#define CAN2_EMIT_ENABLED true
+#define CAN2_BAUD_RATE CAN_250KBPS
+#define CAN2_EMIT_FREQUENCE_MILLIS 50
+
 #define MAX_MOTOR_TORQUE 500
 
 #define ERROR_CODE_CAN_SETUP_FAILED 3
@@ -28,7 +37,9 @@
 
 AsyncTimer timer;
 LedManager led;
-MCP_CAN can(CAN_CHIP_SELECT_PIN);
+
+MCP_CAN can1(CAN1_CHIP_SELECT_PIN);
+MCP_CAN can2(CAN2_CHIP_SELECT_PIN);
 
 uint8_t inBufferr[64];
 uint8_t inBufferrLen = 0;
@@ -36,8 +47,9 @@ uint8_t inBufferrLen = 0;
 PACKET_PGN_61443_ElectricEngineController2 pgn61443;
 bool pgn61443_valid = false;
 
-byte sendJ1939(uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen);
-void emitTranslatedMessages();
+byte sendJ1939(MCP_CAN* can, uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen);
+void emitTranslatedMessages(MCP_CAN* can);
+void processCan(MCP_CAN* can);
 
 /**
  * Called by the android subsystem to set things up
@@ -45,20 +57,39 @@ void emitTranslatedMessages();
 void setup() {
 
   Serial.begin(9600);
+  delay(5000);
   debug_println("Starting CAN Translator");
 
-  if (can.begin(MCP_STDEXT, CAN_500KBPS, MCP_16MHZ) != CAN_OK) {
-    debug_println("Configuring CAN failed");
+  // setup can1
+  if (can1.begin(MCP_STDEXT, CAN1_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+    debug_println("Configuring CAN1 failed");
     while (true) {
       led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
     }
   }
-  can.setMode(MCP_NORMAL);
-  debug_println("CAN started");
+  can1.setMode(MCP_NORMAL);
+  debug_println("CAN1 started");
 
-  // setup emitter
-  if (CAN_EMIT_ENABLED) {
-    timer.setInterval(emitTranslatedMessages, CAN_EMIT_FREQUENCE_MILLIS);
+  // setup can2
+  if (can2.begin(MCP_STDEXT, CAN2_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+    debug_println("Configuring CAN2 failed");
+    while (true) {
+      led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
+    }
+  }
+  can2.setMode(MCP_NORMAL);
+  debug_println("CAN2 started");
+
+  // setup emitters
+  if (CAN1_EMIT_ENABLED) {
+    debug_println("Listening for messages on CAN1");
+    timer.setInterval([]() { emitTranslatedMessages(&can1); }, CAN1_EMIT_FREQUENCE_MILLIS);
+    timer.setInterval([]() { debug_println("- Listening for messages on CAN1"); led.flashOn(5); }, 10000);
+  }
+  if (CAN2_EMIT_ENABLED) {
+    debug_println("Listening for messages on CAN2");
+    timer.setInterval([]() { emitTranslatedMessages(&can2); }, CAN2_EMIT_FREQUENCE_MILLIS);
+    timer.setInterval([]() { debug_println("- Listening for messages on CAN2"); led.flashOn(5); }, 10000);
   }
 }
 
@@ -68,13 +99,23 @@ void setup() {
 void loop() {
   timer.handle();
 
-  if (can.checkReceive() != CAN_MSGAVAIL) {
+  if (CAN1_LISTEN_ENABLED) {
+    processCan(&can1);
+  }
+  if (CAN2_LISTEN_ENABLED) {
+    processCan(&can2);
+  }
+}
+
+void processCan(MCP_CAN* can) {
+
+  if (can->checkReceive() != CAN_MSGAVAIL) {
     return;
   }
 
   uint32_t msgId = -1;
   byte msgIsExtended = 0;
-  if (can.readMsgBuf(&msgId, &msgIsExtended, &inBufferrLen, inBufferr) != CAN_OK) {
+  if (can->readMsgBuf(&msgId, &msgIsExtended, &inBufferrLen, inBufferr) != CAN_OK) {
     debug_println("Unable to can.readMsgBuf");
     return;
   }
@@ -157,6 +198,7 @@ void loop() {
       debug_print("  Motor_TargetSpeed: "); debug_println(Motor_TargetSpeed, DEC);
       debug_print("  SpeedControl_PID: "); debug_println(SpeedControl_PID, DEC);
       debug_print("  SpeedControl_PID_Error: "); debug_println(SpeedControl_PID_Error, DEC);
+
       break;
     }
 
@@ -185,7 +227,7 @@ void loop() {
 /**
  * Emits translated messages
  */
-void emitTranslatedMessages() {
+void emitTranslatedMessages(MCP_CAN* can) {
 
   // send PGN 61443
   if (pgn61443_valid) {
@@ -197,14 +239,14 @@ void emitTranslatedMessages() {
     debug_print("  Accelerator_Pedal_Position_1: "); debug_println(pgn61443.Accelerator_Pedal_Position_1, DEC);
     debug_print("  Percent_Load_At_Current_Speed: "); debug_println(pgn61443.Percent_Load_At_Current_Speed, DEC);
     debug_print("  Remote_Accelerator_Pedal_Position:"); debug_println(pgn61443.Remote_Accelerator_Pedal_Position, DEC);
-    sendJ1939(PGN_61443_ElectricEngineController2, 3, 0, 0, (uint8_t*)&pgn61443, PGN_61443_ElectricEngineController2_Size);
+    sendJ1939(can, PGN_61443_ElectricEngineController2, 3, 0, 0, (uint8_t*)&pgn61443, PGN_61443_ElectricEngineController2_Size);
   }
 }
 
 /**
  * Sends a J1939 CAN message
  **/
-byte sendJ1939(uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen) {
+byte sendJ1939(MCP_CAN* can, uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen) {
 
   // check for a p2p packet
   bool isPeerToPeer = false;
@@ -222,5 +264,5 @@ byte sendJ1939(uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDest
     lID = lID | (static_cast<uint32_t>(nDestAddr) << 8);
   }
 
-  return can.sendMsgBuf(lID, CAN_EXTID, nDataLen, nData);
+  return can->sendMsgBuf(lID, CAN_EXTID, nDataLen, nData);
 }
