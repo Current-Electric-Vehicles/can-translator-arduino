@@ -9,14 +9,14 @@
 #define DEBUG_ENABLED true
 
 #define CAN1_CHIP_SELECT_PIN 3
-#define CAN1_LISTEN_ENABLED true
+#define CAN1_LISTEN_ENABLED false
 #define CAN1_EMIT_ENABLED false
 #define CAN1_BAUD_RATE CAN_500KBPS
 #define CAN1_EMIT_FREQUENCE_MILLIS 50
 
 #define CAN2_CHIP_SELECT_PIN 4
 #define CAN2_LISTEN_ENABLED true
-#define CAN2_EMIT_ENABLED true
+#define CAN2_EMIT_ENABLED false
 #define CAN2_BAUD_RATE CAN_250KBPS
 #define CAN2_EMIT_FREQUENCE_MILLIS 50
 
@@ -47,6 +47,7 @@ bool logCan2 = false;
 uint64_t can2MessageCount = 0;
 
 bool logParsedCanMessages = false;
+bool logEmittedCanMessages = false;
 
 uint8_t inBufferr[64];
 uint8_t inBufferrLen = 0;
@@ -56,7 +57,7 @@ uint8_t cmdBuffer[129];
 uint8_t cmdBufferLen;
 
 PACKET_PGN_61443_ElectricEngineController2 pgn61443;
-bool pgn61443_valid = false;
+bool pgn61443_valid = true;
 
 byte sendJ1939(MCP_CAN* can, uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen);
 void emitTranslatedMessages(MCP_CAN* can);
@@ -74,20 +75,26 @@ void setup() {
   debug_println("Starting CAN Translator");
 
   // setup can1
-  if ((CAN1_EMIT_ENABLED || CAN1_EMIT_ENABLED) && can1.begin(MCP_STDEXT, CAN1_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
-    debug_println("Configuring CAN1 failed");
-    while (true) {
-      led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
+  if (CAN1_LISTEN_ENABLED || CAN1_EMIT_ENABLED) {
+    debug_println("Configuring CAN1");
+    if (can1.begin(MCP_STDEXT, CAN1_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+      debug_println("Configuring CAN1 failed");
+      while (true) {
+        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
+      }
     }
   }
   can1.setMode(MCP_NORMAL);
   debug_println("CAN1 started");
 
   // setup can2
-  if ((CAN2_EMIT_ENABLED || CAN2_EMIT_ENABLED) && can2.begin(MCP_STDEXT, CAN2_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
-    debug_println("Configuring CAN2 failed");
-    while (true) {
-      led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
+  if (CAN2_LISTEN_ENABLED || CAN2_EMIT_ENABLED) {
+    debug_println("Configuring CAN2");
+    if (can2.begin(MCP_STDEXT, CAN2_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+      debug_println("Configuring CAN2 failed");
+      while (true) {
+        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
+      }
     }
   }
   can2.setMode(MCP_NORMAL);
@@ -95,17 +102,22 @@ void setup() {
 
   // setup emitters
   if (CAN1_EMIT_ENABLED) {
-    debug_println("Listening for messages on CAN1");
+    debug_println("Emitting messages on CAN1");
     timer.setInterval([]() { emitTranslatedMessages(&can1); }, CAN1_EMIT_FREQUENCE_MILLIS);
+  }
+  if (CAN1_LISTEN_ENABLED) {
     timer.setInterval([]() {
       debug_print("Listening for messages on CAN1 (");
       debug_print(can1MessageCount, DEC);
       debug_println(")");
     }, 10000);
   }
+
   if (CAN2_EMIT_ENABLED) {
-    debug_println("Listening for messages on CAN2");
+    debug_println("Emitting messages on CAN2");
     timer.setInterval([]() { emitTranslatedMessages(&can2); }, CAN2_EMIT_FREQUENCE_MILLIS);
+  }
+  if (CAN2_LISTEN_ENABLED) {
     timer.setInterval([]() {
       debug_print("Listening for messages on CAN2 (");
       debug_print(can2MessageCount, DEC);
@@ -120,12 +132,11 @@ void setup() {
  */
 void loop() {
   timer.handle();
-
   if (CAN1_LISTEN_ENABLED) {
     processCan("CAN1", &can1MessageCount, logCan1, &can1);
   }
   if (CAN2_LISTEN_ENABLED) {
-    processCan("CAN2", &can2MessageCount, logCan1, &can2);
+    processCan("CAN2", &can2MessageCount, logCan2, &can2);
   }
   processSerial();
 }
@@ -176,6 +187,7 @@ void processSerial() {
     Serial.println("log-can1: enable can1 logging to serial");
     Serial.println("log-can2: enable can2 logging to serial");
     Serial.println("log-can-parsed: enable logging of parsed can messages on all can networks");
+    Serial.println("log-can-emitted: enable logging of emitted can messages on all can networks");
 
   } else if (strcmp(cmd, "packet") == 0) {
     Serial.println("PACKET_PGN_61443_ElectricEngineController2:");
@@ -198,6 +210,10 @@ void processSerial() {
   } else if (strcmp(cmd, "log-can-parsed") == 0) {
     logParsedCanMessages = !logParsedCanMessages;
     Serial.print("Parsed CAN messages logging: "); Serial.println(logParsedCanMessages ? "ON" : "OFF");
+
+  } else if (strcmp(cmd, "log-can-emitted") == 0) {
+    logEmittedCanMessages = !logEmittedCanMessages;
+    Serial.print("Emitted CAN messages logging: "); Serial.println(logEmittedCanMessages ? "ON" : "OFF");
     
   } else {
     Serial.print("Unknown command: ");
@@ -231,14 +247,12 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
     }
   }
 
-  debug_print("Incoming can message with iud: "); debug_println(msgId, DEC);
-
   // we ignore messages that aren't extended
   if (msgIsExtended != 1) {
     return;
   }
 
-  led.flashOn(5);
+  // led.flashOn(5);
 
   switch (msgId) {
 
@@ -247,7 +261,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
       PACKET_M106_DriverInputs1* inPacket = (PACKET_M106_DriverInputs1*)&inBufferr[0];
       uint8_t AccelPedalPct = static_cast<float>(inPacket->AccelPedal) * 0.392157f;
 
-      if (logParsedCanMessages) {
+      if (logParsedCanMessages && false) {
         Serial.println("PACKET_M106_DriverInputs1:");
         Serial.print("  Manual_Regen2: "); Serial.println(inPacket->Manual_Regen2, DEC);
         Serial.print("  Manual_Regen1: "); Serial.println(inPacket->Manual_Regen1, DEC);
@@ -264,7 +278,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
         Serial.print("  AccelPedal2: "); Serial.println(inPacket->AccelPedal2, DEC);
         Serial.print("  AccelPedal1: "); Serial.println(inPacket->AccelPedal1, DEC);
         Serial.print("  AccelPedal: "); Serial.println(inPacket->AccelPedal, DEC);
-        Serial.print("  AccelPedalPct:"); Serial.println(AccelPedalPct, 4);
+        Serial.print("  AccelPedalPct:"); Serial.println(AccelPedalPct);
       }
 
       pgn61443_valid = true;
@@ -282,15 +296,15 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
       PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
       uint8_t BrakeVacPressurePct = static_cast<uint8_t>((static_cast<float>(inPacket->BrakeVacPressure) * 0.14504f) - 14.696f);
 
-      if (logParsedCanMessages) {
-        Serial.println("PACKET_M106_DriverInputs1:");
+      if (logParsedCanMessages && false) {
+        Serial.println("PACKET_ID_M116_VehicleInputs3:");
         Serial.print("  TC_Slip_Measured: "); Serial.println(inPacket->TC_Slip_Measured, DEC);
         Serial.print("  Ground_WheelSpeed: "); Serial.println(inPacket->Ground_WheelSpeed, DEC);
         Serial.print("  DriveWheel_Speed: "); Serial.println(inPacket->DriveWheel_Speed, DEC);
         Serial.print("  DriveShaft_Speed: "); Serial.println(inPacket->DriveShaft_Speed, DEC);
         Serial.print("  Vehicle_Speed: "); Serial.println(inPacket->Vehicle_Speed, DEC);
         Serial.print("  BrakeVacPressure: "); Serial.println(inPacket->BrakeVacPressure, DEC);
-        Serial.print("  BrakeVacPressurePct:"); Serial.println(BrakeVacPressurePct, 4);
+        Serial.print("  BrakeVacPressurePct:"); Serial.println(BrakeVacPressurePct);
       }
 
       break;
@@ -304,7 +318,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
       uint8_t SpeedControl_PID = (static_cast<float>(inPacket->SpeedControl_PID) * 0.5f);
       uint8_t SpeedControl_PID_Error = (static_cast<float>(inPacket->SpeedControl_PID_Error) * 0.5f);
 
-      if (logParsedCanMessages) {
+      if (logParsedCanMessages && false) {
         Serial.println("PACKET_M138_MotorSpeedData2:");
         Serial.print("  LaunchTarget_Speed: "); Serial.println(inPacket->LaunchTarget_Speed, DEC);
         Serial.print("  Motor_TargetSpeed: "); Serial.println(inPacket->Motor_TargetSpeed, DEC);
@@ -322,9 +336,11 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
     case PACKET_ID_M120_MotorTorqueData1: {
 
       PACKET_M120_MotorTorqueData1* inPacket = (PACKET_M120_MotorTorqueData1*)&inBufferr[0];
-      uint8_t Motor1_Torque_RequestPct = CLAMP((abs(inPacket->Motor1_Torque_Request) / MAX_MOTOR_TORQUE) * 100, 0, 250);
+      float Motor1_Torque_RequestPct = (static_cast<float>(inPacket->Motor1_Torque_Request) * 0.5);
+      Motor1_Torque_RequestPct /= static_cast<float>(MAX_MOTOR_TORQUE);
+      Motor1_Torque_RequestPct *= static_cast<float>(100);
 
-      if (logParsedCanMessages) {
+      if (logParsedCanMessages && true) {
         Serial.println("PACKET_M120_MotorTorqueData1:");
         Serial.print("  Motor1_Torque_Request: "); Serial.println(inPacket->Motor1_Torque_Request, DEC);
         Serial.print("  Motor1_TqLimHi: "); Serial.println(inPacket->Motor1_TqLimHi, DEC);
@@ -332,11 +348,18 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
         Serial.print("  Motor1_TqTable: "); Serial.println(inPacket->Motor1_TqTable, DEC);
         Serial.print("  Motor1_TqLimMultHi: "); Serial.println(inPacket->Motor1_TqLimMultHi, DEC);
         Serial.print("  Motor1_TqLimMultLo: "); Serial.println(inPacket->Motor1_TqLimMultLo, DEC);
-        Serial.print("  Motor1_Torque_RequestPct: "); Serial.println(Motor1_Torque_RequestPct, DEC);
+        Serial.print("  Motor1_Torque_RequestPct: "); Serial.println(Motor1_Torque_RequestPct);
       }
 
       pgn61443_valid = true;
-      pgn61443.Percent_Load_At_Current_Speed = Motor1_Torque_RequestPct;
+      pgn61443.Percent_Load_At_Current_Speed = static_cast<uint8_t>(Motor1_Torque_RequestPct);
+
+      /*
+      Serial.print(name); Serial.print(" incoming message with ID: "); Serial.println(msgId, HEX); 
+      for (uint8_t i = 0; i<inBufferrLen; i++) {
+        Serial.print("  Byte "); Serial.print(i); Serial.print(": "); Serial.println(inBufferr[i], HEX); 
+      }
+      */
 
       break;
     }
@@ -351,7 +374,10 @@ void emitTranslatedMessages(MCP_CAN* can) {
   // send PGN 61443
   if (pgn61443_valid) {
 
-    if (logParsedCanMessages) {
+      pgn61443.Accelerator_Pedal_Position_1 = 50 / 0.4;
+      pgn61443.Percent_Load_At_Current_Speed = 200;
+
+    if (logEmittedCanMessages) {
       Serial.println("EMITTING PACKET_PGN_61443_ElectricEngineController2:");
       Serial.print("  NotDefined1: "); Serial.println(pgn61443.NotDefined1, DEC);
       Serial.print("  Road_Speed_Limit_Status: "); Serial.println(pgn61443.Road_Speed_Limit_Status, DEC);

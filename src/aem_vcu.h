@@ -9,55 +9,55 @@
 #define PACKET_ID_M106_DriverInputs1 0x2F0A006
 
 struct PACKET_M106_DriverInputs1 {
-    uint8_t AccelPedal;
-    uint8_t AccelPedal1;
-    uint8_t AccelPedal2;
-    uint8_t AccelPedalXCheckDiff;
-    int8_t Start_Switch : 1;
-    int8_t Ignition_Switch : 1;
-    int8_t Brake_Switch2 : 1;
-    int8_t Brake_Switch1 : 1;
-    int8_t Brake_Switch : 1;
-    int8_t AccelPedal2Valid : 1;
-    int8_t AccelPedal1Valid : 1;
-    int8_t AccelPedalValid : 1;
-    uint8_t Manual_Regen;
-    uint8_t Manual_Regen1;
-    uint8_t Manual_Regen2;
+    unsigned AccelPedal;
+    unsigned AccelPedal1;
+    unsigned AccelPedal2;
+    unsigned AccelPedalXCheckDiff;
+    signed Start_Switch : 1;
+    signed Ignition_Switch : 1;
+    signed Brake_Switch2 : 1;
+    signed Brake_Switch1 : 1;
+    signed Brake_Switch : 1;
+    signed AccelPedal2Valid : 1;
+    signed AccelPedal1Valid : 1;
+    signed AccelPedalValid : 1;
+    unsigned Manual_Regen;
+    unsigned Manual_Regen1;
+    unsigned Manual_Regen2;
 };
 
 
 #define PACKET_ID_M116_VehicleInputs3 0x2F0A016
 
 struct PACKET_M116_VehicleInputs3 {
-    uint8_t BrakeVacPressure;
-    uint8_t Vehicle_Speed;
-    uint16_t DriveShaft_Speed;
-    uint8_t DriveWheel_Speed;
-    uint8_t Ground_WheelSpeed;
-    uint8_t TC_Slip_Measured;
+    unsigned BrakeVacPressure;
+    unsigned Vehicle_Speed;
+    unsigned DriveShaft_Speed;
+    unsigned DriveWheel_Speed;
+    unsigned Ground_WheelSpeed;
+    unsigned TC_Slip_Measured;
 };
 
 
 #define PACKET_ID_M138_MotorSpeedData2 0x2F0A038
 
 struct PACKET_M138_MotorSpeedData2 {
-    uint16_t LaunchTarget_Speed;
-    uint16_t Motor_TargetSpeed;
-    int16_t SpeedControl_PID : 12;
-    int16_t SpeedControl_PID_Error : 12;
+    unsigned LaunchTarget_Speed;
+    unsigned Motor_TargetSpeed;
+    signed SpeedControl_PID : 12;
+    signed SpeedControl_PID_Error : 12;
 };
 
 
 #define PACKET_ID_M120_MotorTorqueData1 0x2F0A020
 
 struct PACKET_M120_MotorTorqueData1 {
-    int16_t Motor1_Torque_Request : 12;
-    uint16_t Motor1_TqLimHi : 12;
-    int16_t Motor1_TqLimLo : 12;
-    uint16_t Motor1_TqTable : 12;
-    uint8_t Motor1_TqLimMultHi : 8;
-    uint8_t Motor1_TqLimMultLo : 8;
+    signed Motor1_Torque_Request : 12;
+    unsigned Motor1_TqLimHi : 12;
+    signed Motor1_TqLimLo : 12;
+    unsigned Motor1_TqTable : 12;
+    unsigned Motor1_TqLimMultHi : 8;
+    unsigned Motor1_TqLimMultLo : 8;
 };
 
 #endif
