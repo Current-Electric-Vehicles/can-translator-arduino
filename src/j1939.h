@@ -3,6 +3,9 @@
 #define J1939_h
 
 #include <Arduino.h>
+#include <mcp_can.h>
+
+byte sendJ1939(MCP_CAN* can, uint32_t lPGN, uint8_t nPriority, uint8_t nSrcAddr, uint8_t nDestAddr, uint8_t* nData, uint8_t nDataLen);
 
 // https://powertraincontrolsolutions.com/download/Released/Public/Developer_Files/PCS%20J1939%20Messages%20v2_1.pdf
 
@@ -18,6 +21,5 @@ struct PACKET_PGN_61443_ElectricEngineController2 {
     unsigned Percent_Load_At_Current_Speed;
     unsigned Remote_Accelerator_Pedal_Position;
 };
-
 
 #endif
