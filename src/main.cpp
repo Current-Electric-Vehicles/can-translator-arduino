@@ -15,12 +15,11 @@
 #define CAN1_EMIT_FREQUENCE_MILLIS 20
 
 #define CAN2_CHIP_SELECT_PIN 4
-#define CAN2_LISTEN_ENABLED true
+#define CAN2_LISTEN_ENABLED false
 #define CAN2_EMIT_ENABLED true
 #define CAN2_BAUD_RATE CAN_500KBPS
 #define CAN2_EMIT_FREQUENCE_MILLIS 20
 
-#define MAX_MOTOR_TORQUE 500
 #define MAX_MOTOR_RPM 12000
 
 #define ERROR_CODE_CAN_SETUP_FAILED 3
@@ -40,7 +39,6 @@ bool reverseSwitch = false;
 bool driveSwitch = false;
 bool neutralSwitch = false;
 bool parkSwitch = false;
-uint16_t motorRpm = 0;
 float acceleratorPedalPct = 0;
 PACKET_Chrysler_300c_0x0308 outputPacket;
 
@@ -222,6 +220,10 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
       neutralSwitch = inPacket->Neutral_Switch;
       parkSwitch = inPacket->Park_Switch;
 
+    if (!driveSwitch && !reverseSwitch) {
+        outputPacket.Engine_RPM = static_cast<float>(MAX_MOTOR_RPM) * (acceleratorPedalPct / static_cast<float>(100));
+      }
+
       if (logParsedCanMessages) {
         Serial.println("PACKET_M108_DriverInputs2:");
         Serial.print("  ManRegen_XCheckDiff: "); Serial.println(inPacket->ManRegen_XCheckDiff, DEC);
@@ -253,10 +255,9 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
     case PACKET_ID_M116_VehicleInputs3: {
 
       PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
-      motorRpm = inPacket->DriveShaft_Speed;
 
       if (driveSwitch || reverseSwitch) {
-        motorRpm = inPacket->DriveShaft_Speed;
+        outputPacket.Engine_RPM = inPacket->DriveShaft_Speed;
       } else {
         outputPacket.Engine_RPM = static_cast<float>(MAX_MOTOR_RPM) * (acceleratorPedalPct / static_cast<float>(100));
       }
@@ -282,16 +283,12 @@ void emitTranslatedMessages(MCP_CAN* can, uint64_t* counter) {
 
   (*counter)++;
 
-  // send PGN 61443
-  // pgn61443.Accelerator_Pedal_Position_1 = 50 / 0.4;
-  // pgn61443.Percent_Load_At_Current_Speed = 200;
-
   if (logEmittedCanMessages) {
     Serial.println("EMITTING PACKET_Chrysler_300c_0x0308:");
     Serial.print("  Engine_RPM: "); Serial.println(outputPacket.Engine_RPM, DEC);
   }
   
-  can->sendMsgBuf(Chrysler_300c_0x0308, 8, (INT8U*)&outputPacket);
+  can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, (INT8U*)&outputPacket);
 }
 
 /**
