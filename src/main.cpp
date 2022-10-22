@@ -20,7 +20,9 @@
 #define CAN2_BAUD_RATE CAN_500KBPS
 #define CAN2_EMIT_FREQUENCE_MILLIS 20
 
-#define MAX_MOTOR_RPM 12000
+#define EV_MOTOR_MAX_RPM 12000
+#define EMULATOED_MOTOR_MAX_RPM 6200
+#define EMULATOED_MOTOR_IDLE_RPM 500
 
 #define ERROR_CODE_CAN_SETUP_FAILED 3
 
@@ -40,6 +42,8 @@ bool driveSwitch = false;
 bool neutralSwitch = false;
 bool parkSwitch = false;
 float acceleratorPedalPct = 0;
+uint16_t targetEmulatedRpm = 0;
+uint16_t rpmRamp = 50;
 PACKET_Chrysler_300c_0x0308 outputPacket;
 
 AsyncTimer timer;
@@ -135,6 +139,18 @@ void setup() {
       debug_println(")");
     }, 10000);
   }
+
+  timer.setInterval([]() {
+    if (targetEmulatedRpm == outputPacket.Engine_RPM) {
+      return;
+    }
+    if (targetEmulatedRpm > outputPacket.Engine_RPM) {
+      outputPacket.Engine_RPM += rpmRamp;
+    } else {
+      outputPacket.Engine_RPM -= rpmRamp;
+    }
+    // outputPacket.Engine_RPM += 1;
+  }, 5);
 }
 
 /**
@@ -220,10 +236,6 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
       neutralSwitch = inPacket->Neutral_Switch;
       parkSwitch = inPacket->Park_Switch;
 
-    if (!driveSwitch && !reverseSwitch) {
-        outputPacket.Engine_RPM = static_cast<float>(MAX_MOTOR_RPM) * (acceleratorPedalPct / static_cast<float>(100));
-      }
-
       if (logParsedCanMessages) {
         Serial.println("PACKET_M108_DriverInputs2:");
         Serial.print("  ManRegen_XCheckDiff: "); Serial.println(inPacket->ManRegen_XCheckDiff, DEC);
@@ -256,11 +268,25 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* c
 
       PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
 
-      if (driveSwitch || reverseSwitch) {
-        outputPacket.Engine_RPM = inPacket->DriveShaft_Speed;
-      } else {
-        outputPacket.Engine_RPM = static_cast<float>(MAX_MOTOR_RPM) * (acceleratorPedalPct / static_cast<float>(100));
+      if (!driveSwitch && !reverseSwitch) {
       }
+
+      if (driveSwitch || reverseSwitch) {
+        Serial.println("PACKET_M116_VehicleInputs3:");
+        Serial.print("  BrakeVacPressure: "); Serial.println(inPacket->BrakeVacPressure, DEC);
+        Serial.print("  Vehicle_Speed: "); Serial.println(inPacket->Vehicle_Speed, DEC);
+        Serial.print("  DriveShaft_Speed: "); Serial.println(inPacket->DriveShaft_Speed, DEC);
+        Serial.print("  DriveWheel_Speed: "); Serial.println(inPacket->DriveWheel_Speed, DEC);
+        Serial.print("  Ground_WheelSpeed: "); Serial.println(inPacket->Ground_WheelSpeed, DEC);
+        Serial.print("  TC_Slip_Measured: "); Serial.println(inPacket->TC_Slip_Measured, DEC);
+
+        float pct = static_cast<float>(inPacket->Vehicle_Speed) / static_cast<float>(100);
+        targetEmulatedRpm = static_cast<float>(EMULATOED_MOTOR_MAX_RPM) * pct;
+      } else {
+        targetEmulatedRpm = static_cast<float>(EMULATOED_MOTOR_MAX_RPM) * (acceleratorPedalPct / static_cast<float>(100));
+      }
+
+      targetEmulatedRpm += EMULATOED_MOTOR_IDLE_RPM;
 
       if (logParsedCanMessages) {
         Serial.println("PACKET_M116_VehicleInputs3:");
@@ -287,8 +313,20 @@ void emitTranslatedMessages(MCP_CAN* can, uint64_t* counter) {
     Serial.println("EMITTING PACKET_Chrysler_300c_0x0308:");
     Serial.print("  Engine_RPM: "); Serial.println(outputPacket.Engine_RPM, DEC);
   }
+
+  INT8U balls[8] = {
+    0,
+    outputPacket.Engine_RPM >> 8,
+    outputPacket.Engine_RPM,
+    0,
+    0,
+    0,
+    0,
+    0
+  };
   
-  can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, (INT8U*)&outputPacket);
+  // can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, (INT8U*)&outputPacket);
+  can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, balls);
 }
 
 /**
