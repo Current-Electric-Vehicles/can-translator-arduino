@@ -12,12 +12,14 @@
 #define CAN1_LISTEN_ENABLED true
 #define CAN1_EMIT_ENABLED false
 #define CAN1_BAUD_RATE CAN_500KBPS
+#define CAN1_MHZ MCP_20MHZ
 #define CAN1_EMIT_FREQUENCE_MILLIS 20
 
 #define CAN2_CHIP_SELECT_PIN 4
 #define CAN2_LISTEN_ENABLED false
 #define CAN2_EMIT_ENABLED true
 #define CAN2_BAUD_RATE CAN_500KBPS
+#define CAN2_MHZ MCP_20MHZ
 #define CAN2_EMIT_FREQUENCE_MILLIS 20
 
 #define EV_MOTOR_MAX_RPM 12000
@@ -86,28 +88,26 @@ void setup() {
   // setup can1
   if (CAN1_LISTEN_ENABLED || CAN1_EMIT_ENABLED) {
     debug_println("Configuring CAN1");
-    if (can1.begin(MCP_ANY, CAN1_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+    if (can1.begin(MCP_ANY, CAN1_BAUD_RATE, CAN1_MHZ) != CAN_OK) {
       debug_println("Configuring CAN1 failed");
       while (true) {
         led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
       }
     }
     can1.setMode(MCP_NORMAL);
-    can1.enOneShotTX();
     debug_println("CAN1 started");
   }
 
   // setup can2
   if (CAN2_LISTEN_ENABLED || CAN2_EMIT_ENABLED) {
     debug_println("Configuring CAN2");
-    if (can2.begin(MCP_ANY, CAN2_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+    if (can2.begin(MCP_ANY, CAN2_BAUD_RATE, CAN2_MHZ) != CAN_OK) {
       debug_println("Configuring CAN2 failed");
       while (true) {
         led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
       }
     }
     can2.setMode(MCP_NORMAL);
-    can2.enOneShotTX();
     debug_println("CAN2 started");
   }
 
