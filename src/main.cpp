@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <mcp2515.h>
+#include <mcp_can.h>
 #include <AsyncTimer.h>
 
 #include "LedManager.h"
@@ -49,12 +49,12 @@ PACKET_Chrysler_300c_0x0308 outputPacket;
 AsyncTimer timer;
 LedManager led;
 
-MCP2515 can1(CAN1_CHIP_SELECT_PIN);
+MCP_CAN can1(CAN1_CHIP_SELECT_PIN);
 bool logCan1 = false;
 uint64_t can1MessageCount = 0;
 uint64_t can1MessageSentCount = 0;
 
-MCP2515 can2(CAN2_CHIP_SELECT_PIN);
+MCP_CAN can2(CAN2_CHIP_SELECT_PIN);
 bool logCan2 = false;
 uint64_t can2MessageCount = 0;
 uint64_t can2MessageSentCount = 0;
@@ -62,12 +62,15 @@ uint64_t can2MessageSentCount = 0;
 bool logParsedCanMessages = false;
 bool logEmittedCanMessages = false;
 
+uint8_t inBufferr[64];
+uint8_t inBufferrLen = 0;
+
 #define CLEAR_CMD_BUFFER() memset(&cmdBuffer, '\0', 128); cmdBufferLen = 0
 uint8_t cmdBuffer[129];
 uint8_t cmdBufferLen;
 
-void emitTranslatedMessages(MCP2515* can, uint64_t* counter);
-void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP2515* can);
+void emitTranslatedMessages(MCP_CAN* can, uint64_t* counter);
+void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* can);
 void processSerial();
 
 /**
@@ -83,49 +86,29 @@ void setup() {
   // setup can1
   if (CAN1_LISTEN_ENABLED || CAN1_EMIT_ENABLED) {
     debug_println("Configuring CAN1");
-    if (can1.reset() != MCP2515::ERROR_OK) {
-      debug_println("Unabel to reset CAN1");
+    if (can1.begin(MCP_ANY, CAN1_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+      debug_println("Configuring CAN1 failed");
       while (true) {
         led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
       }
     }
-    if (can1.setBitrate(CAN1_BAUD_RATE) != MCP2515::ERROR_OK) {
-      debug_println("Unabel to set baud rate for CAN1");
-      while (true) {
-        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
-      }
-    }
-    if (can1.setNormalMode() != MCP2515::ERROR_OK) {
-      debug_println("Unabel to set normal mode for CAN1");
-      while (true) {
-        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
-      }
-    }
+    can1.setMode(MCP_NORMAL);
+    can1.enOneShotTX();
     debug_println("CAN1 started");
   }
 
   // setup can2
   if (CAN2_LISTEN_ENABLED || CAN2_EMIT_ENABLED) {
     debug_println("Configuring CAN2");
-    if (can2.reset() != MCP2515::ERROR_OK) {
-      debug_println("Unabel to reset CAN2");
+    if (can2.begin(MCP_ANY, CAN2_BAUD_RATE, MCP_16MHZ) != CAN_OK) {
+      debug_println("Configuring CAN2 failed");
       while (true) {
         led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
       }
     }
-    if (can2.setBitrate(CAN1_BAUD_RATE) != MCP2515::ERROR_OK) {
-      debug_println("Unabel to set baud rate for CAN2");
-      while (true) {
-        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
-      }
-    }
-    if (can2.setNormalMode() != MCP2515::ERROR_OK) {
-      debug_println("Unabel to set normal mode for CAN2");
-      while (true) {
-        led.flashError(ERROR_CODE_CAN_SETUP_FAILED);
-      }
-    }
-    debug_println("CAN1 started");
+    can2.setMode(MCP_NORMAL);
+    can2.enOneShotTX();
+    debug_println("CAN2 started");
   }
 
   // setup emitters
@@ -187,37 +170,40 @@ void loop() {
 /**
  * Processes CAN messages.
  */
-void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP2515* can) {
+void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP_CAN* can) {
 
-  static struct can_frame canMsg;
+  if (can->checkReceive() != CAN_MSGAVAIL) {
+    return;
+  }
 
-  if (can->readMessage(&canMsg) != MCP2515::ERROR_OK) {
+  uint32_t msgId = -1;
+  byte msgIsExtended = 0;
+  if (can->readMsgBuf(&msgId, &msgIsExtended, &inBufferrLen, inBufferr) != CAN_OK) {
+    debug_println("Unable to can.readMsgBuf");
     return;
   }
 
   (*counter)++;
 
   if (logEnabled) {
-    Serial.print(name); Serial.print(" incoming: "); Serial.print(canMsg.can_id, HEX); Serial.print(" ["); 
-    for (uint8_t i = 0; i<canMsg.can_dlc; i++) {
-      Serial.print(canMsg.data[i], HEX); 
-      Serial.print(" ");
+    Serial.print(name); Serial.print(" incoming message with ID: "); Serial.println(msgId, HEX); 
+    for (uint8_t i = 0; i<inBufferrLen; i++) {
+      Serial.print("  Byte "); Serial.print(i); Serial.print(": "); Serial.println(inBufferr[i], HEX); 
     }
-    Serial.println("]");
   }
 
   // we ignore messages that aren't extended
-  //if ((canMsg.can_id && CAN_EFF_MASK) == CAN_EFF_MASK) {
-  //  return;
-  //}
+  if (msgIsExtended != 1) {
+    return;
+  }
 
   // led.flashOn(5);
 
-  switch (canMsg.can_id) {
+  switch (msgId) {
 
     case PACKET_ID_M106_DriverInputs1: {
 
-      PACKET_M106_DriverInputs1* inPacket = (PACKET_M106_DriverInputs1*)&canMsg.data[0];
+      PACKET_M106_DriverInputs1* inPacket = (PACKET_M106_DriverInputs1*)&inBufferr[0];
       acceleratorPedalPct = static_cast<float>(inPacket->AccelPedal) * 0.392157f;
 
       if (logParsedCanMessages) {
@@ -244,7 +230,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP2515* c
 
     case PACKET_ID_M108_DriverInputs2: {
 
-      PACKET_M108_DriverInputs2* inPacket = (PACKET_M108_DriverInputs2*)&canMsg.data[0];
+      PACKET_M108_DriverInputs2* inPacket = (PACKET_M108_DriverInputs2*)&inBufferr[0];
       reverseSwitch = inPacket->Reverse_Switch;
       driveSwitch = inPacket->Drive_Switch;
       neutralSwitch = inPacket->Neutral_Switch;
@@ -280,7 +266,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP2515* c
 
     case PACKET_ID_M116_VehicleInputs3: {
 
-      PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&canMsg.data[0];
+      PACKET_M116_VehicleInputs3* inPacket = (PACKET_M116_VehicleInputs3*)&inBufferr[0];
 
       if (!driveSwitch && !reverseSwitch) {
       }
@@ -319,8 +305,7 @@ void processCan(const char* name, uint64_t* counter, bool logEnabled, MCP2515* c
 /**
  * Emits translated messages
  */
-void emitTranslatedMessages(MCP2515* can, uint64_t* counter) {
-
+void emitTranslatedMessages(MCP_CAN* can, uint64_t* counter) {
 
   (*counter)++;
 
@@ -329,20 +314,19 @@ void emitTranslatedMessages(MCP2515* can, uint64_t* counter) {
     Serial.print("  Engine_RPM: "); Serial.println(outputPacket.Engine_RPM, DEC);
   }
 
-  static struct can_frame canMsg;
-
-  canMsg.can_id = Chrysler_300c_0x0308;
-  canMsg.can_dlc = Chrysler_300c_0x0308_Size;
-  canMsg.data[0] = 0;
-  canMsg.data[1] = outputPacket.Engine_RPM >> 8;
-  canMsg.data[2] = outputPacket.Engine_RPM;
-  canMsg.data[3] = 0;
-  canMsg.data[4] = 0;
-  canMsg.data[5] = 0;
-  canMsg.data[6] = 0;
-  canMsg.data[7] = 0;
-
-  can->sendMessage(&canMsg);
+  INT8U balls[8] = {
+    0,
+    outputPacket.Engine_RPM >> 8,
+    outputPacket.Engine_RPM,
+    0,
+    0,
+    0,
+    0,
+    0
+  };
+  
+  // can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, (INT8U*)&outputPacket);
+  can->sendMsgBuf(Chrysler_300c_0x0308, Chrysler_300c_0x0308_Size, balls);
 }
 
 /**
@@ -414,6 +398,7 @@ void processSerial() {
   } else {
     Serial.print("Unknown command: ");
     Serial.println(cmd);
+    
   }
   
   CLEAR_CMD_BUFFER();
